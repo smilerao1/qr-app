@@ -751,7 +751,7 @@
   <div style="height:16px"></div>
 
   <!-- Ad Banner -->
-  <div class="ad-banner">BAIG GANDU</div>
+  <div class="ad-banner">📢 Advertisement — Replace with real AdMob banner</div>
 
   <div class="scanner-container">
     <div class="scanner-header">
@@ -777,6 +777,24 @@
   <button class="btn btn-primary" id="scanBtn" onclick="toggleScanner()">
     📷 Start Scanning
   </button>
+
+  <!-- Hidden file input for gallery -->
+  <input type="file" id="galleryInput" accept="image/*" style="display:none;" onchange="scanFromGallery(event)">
+
+  <button class="btn btn-outline" style="margin-top:10px;" onclick="document.getElementById('galleryInput').click()">
+    🖼️ Scan QR from Gallery
+  </button>
+
+  <!-- Gallery scan result -->
+  <div class="result-card" id="galleryResultCard" style="display:none; margin-top:12px;">
+    <div class="result-label">📁 Result from Gallery Image</div>
+    <div class="result-text" id="galleryResultText">—</div>
+    <div class="btn-row">
+      <button class="btn btn-outline btn-sm" onclick="copyGalleryResult()">📋 Copy</button>
+      <button class="btn btn-green btn-sm" onclick="openGalleryLink()">🌐 Open</button>
+      <button class="btn btn-purple btn-sm" onclick="shareGalleryResult()">📤 Share</button>
+    </div>
+  </div>
 
   <!-- Result -->
   <div class="result-card" id="resultCard">
@@ -819,9 +837,7 @@
 <div class="screen" id="screen-generator">
 
   <div style="height:16px"></div>
-  <div class="ad-banner"><!-- Start of banner code -->
-<a href="https://shrinkme.io/ref/ismailrao1"><img src="https://shrinkme.io/banners/ref/728x90GIF.gif" title="Make short links and earn the biggest money" /></a>
-<!-- End of banner code --></div>
+  <div class="ad-banner">📢 Advertisement — Replace with real AdMob banner</div>
 
   <div class="gen-label">Enter text or website link</div>
   <textarea class="gen-input" id="genInput" rows="3"
@@ -851,10 +867,11 @@
   </div>
 
   <div class="qr-output" id="qrOutput">
-    <img id="qrImage" src="" alt="Generated QR Code">
+    <img id="qrImage" src="" alt="Generated QR Code" style="cursor:pointer;" onclick="downloadQR()" title="Tap to save">
+    <p style="font-size:11px; color:var(--muted); margin-top:8px;">👆 Tap image or long press to save</p>
     <p id="qrCaption"></p>
     <div class="btn-row" style="margin-top:16px;">
-      <button class="btn btn-green btn-sm" onclick="downloadQR()">⬇️ Download</button>
+      <button class="btn btn-green btn-sm" onclick="downloadQR()">⬇️ Save to Gallery</button>
       <button class="btn btn-outline btn-sm" onclick="shareQR()">📤 Share</button>
     </div>
   </div>
@@ -1166,25 +1183,132 @@ function downloadQR() {
   const img = document.getElementById('qrImage');
   if (!img.src) return;
 
+  showToast('⏳ Saving to gallery...');
+
   fetch(img.src)
     .then(r => r.blob())
     .then(blob => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'qrcode.png';
-      a.click();
-      showToast('⬇️ Downloading...');
+      // Method 1: Web Share API with file (Android Chrome supports this)
+      if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'qrcode.png', { type: 'image/png' })] })) {
+        const file = new File([blob], 'qrcode.png', { type: 'image/png' });
+        navigator.share({ files: [file], title: 'QR Code' })
+          .then(() => showToast('✅ Saved to gallery!'))
+          .catch(() => fallbackDownload(blob));
+      } else {
+        fallbackDownload(blob);
+      }
     })
-    .catch(() => showToast('❌ Download failed. Try long-pressing the image.'));
+    .catch(() => {
+      // Method 2: Open image directly in new tab — user can long press to save
+      window.open(img.src, '_blank');
+      showToast('📌 Long press image → Save to gallery');
+    });
+}
+
+function fallbackDownload(blob) {
+  try {
+    // Method 3: Create download link
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'QRCode_' + Date.now() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast('✅ Check your Downloads folder!');
+  } catch(e) {
+    showToast('📌 Long press the QR image → Save image');
+  }
 }
 
 function shareQR() {
+  const img = document.getElementById('qrImage');
   const input = document.getElementById('genInput').value.trim();
-  if (!input) return;
+  if (!input || !img.src) return;
+
+  fetch(img.src)
+    .then(r => r.blob())
+    .then(blob => {
+      const file = new File([blob], 'qrcode.png', { type: 'image/png' });
+      // Share as image file (best for WhatsApp, etc.)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+          files: [file],
+          title: 'QR Code',
+          text: 'Scan this QR code: ' + input
+        }).catch(() => shareTextOnly(input));
+      } else if (navigator.share) {
+        shareTextOnly(input);
+      } else {
+        showToast('📋 Long press image to share');
+      }
+    })
+    .catch(() => shareTextOnly(input));
+}
+
+function shareTextOnly(input) {
+  navigator.share({
+    title: 'QR Code',
+    text: 'Scan this QR code: ' + input
+  }).catch(() => showToast('📋 Long press image to share'));
+}
+
+// ===== GALLERY SCAN =====
+let galleryResult = '';
+
+function scanFromGallery(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  showToast('⏳ Reading image...');
+
+  // Show loading state
+  const card = document.getElementById('galleryResultCard');
+  const resultEl = document.getElementById('galleryResultText');
+  card.classList.add('show');
+  resultEl.textContent = '⏳ Scanning image...';
+
+  const html5QrCode = new Html5Qrcode("reader");
+
+  html5QrCode.scanFile(file, true)
+    .then(result => {
+      galleryResult = result;
+      resultEl.textContent = result;
+      saveToHistory(result);
+      scanCount++;
+      localStorage.setItem('scanCount', scanCount);
+      updateScanCount();
+      showToast('✅ QR Code found!');
+      // reset file input so same file can be picked again
+      document.getElementById('galleryInput').value = '';
+    })
+    .catch(err => {
+      resultEl.textContent = '❌ No QR code found in this image. Try a clearer photo.';
+      showToast('❌ No QR code found');
+      document.getElementById('galleryInput').value = '';
+    });
+}
+
+function copyGalleryResult() {
+  if (!galleryResult) return;
+  navigator.clipboard.writeText(galleryResult)
+    .then(() => showToast('📋 Copied!'))
+    .catch(() => showToast('📋 Copied!'));
+}
+
+function openGalleryLink() {
+  if (!galleryResult) return;
+  const url = galleryResult.startsWith('http') ? galleryResult : 'https://' + galleryResult;
+  window.open(url, '_blank');
+}
+
+function shareGalleryResult() {
+  if (!galleryResult) return;
   if (navigator.share) {
-    navigator.share({ title: 'My QR Code', text: 'Scan this QR code: ' + input });
+    navigator.share({ title: 'QR Result', text: galleryResult });
   } else {
-    showToast('📋 Copy the QR image to share');
+    copyGalleryResult();
   }
 }
 
